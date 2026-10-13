@@ -110,3 +110,19 @@ sys_uptime(void)
   release(&tickslock);
   return xticks;
 }
+
+uint64 sys_interpose(void) {
+  int mask;
+  char path[128];
+  
+  // argint does not return a value, so call it by itself
+  argint(0, &mask);
+  
+  // argstr does return a value, so we can check it for errors
+  if(argstr(1, path, sizeof(path)) < 0) {
+      return -1;
+  }
+  
+  myproc()->mask = mask;
+  return 0;
+}

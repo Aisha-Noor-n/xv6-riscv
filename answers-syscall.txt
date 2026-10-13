@@ -1,0 +1,6 @@
+1. usertrap()
+2. The value is 7. It represents the system call ID for SYS_exec.
+3. User mode.
+4. lw a3, 0(zero) (or similar load instruction). The register is a3.
+5. The kernel crashes because address 0 is not mapped in the kernel's address space.
+6. Name: init. PID: 1.
