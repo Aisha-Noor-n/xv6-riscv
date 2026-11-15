@@ -103,6 +103,7 @@ extern uint64 sys_link(void);
 extern uint64 sys_mkdir(void);
 extern uint64 sys_close(void);
 extern uint64 sys_sync(void);
+
 extern uint64 sys_interpose(void);
 
 // An array mapping syscall numbers from syscall.h
@@ -131,9 +132,10 @@ static uint64 (*syscalls[])(void) = {
   [SYS_mkdir]   = sys_mkdir,
   [SYS_close]   = sys_close,
   [SYS_sync]    = sys_sync,
-  [SYS_interpose] sys_interpose,
+  [SYS_interpose] = sys_interpose,
   // clang-format on
 };
+
 
 void
 syscall(void)
@@ -142,14 +144,27 @@ syscall(void)
   struct proc *p = myproc();
 
   num = p->trapframe->a7;
-  if(num > 0 && num < NELEM(syscalls) && syscalls[num]) {
-    // --- SANDBOX CHECK ---
-    if ((p->mask & (1 << num)) != 0) {
+
+  if (num > 0 && num < NELEM(syscalls) && syscalls[num]) {
+    if (p->sandbox_mask & (1 << num)) {
+      if (num == SYS_open && p->sandbox_path[0] != '-' &&
+          p->sandbox_path[0] != '\0') {
+        char path[MAXPATH];
+
+        if (argstr(0, path, MAXPATH) >= 0 &&
+            strncmp(path, p->sandbox_path, MAXPATH) == 0) {
+          p->trapframe->a0 = syscalls[num]();
+        } else {
+          p->trapframe->a0 = -1;
+        }
+      } else {
         p->trapframe->a0 = -1;
+      }
     } else {
-        p->trapframe->a0 = syscalls[num]();
+      p->trapframe->a0 = syscalls[num]();
     }
   } else {
+    printk("unknown sys call %d\n", num);
     p->trapframe->a0 = -1;
   }
 }

@@ -2,32 +2,18 @@
 #include "kernel/stat.h"
 #include "user/user.h"
 
-void sleep(int ticks);
-
-
-int main(int argc, char *argv[])
+int
+main(int argc, char *argv[])
 {
-    if (argc != 2)
-    {
-        fprintf(2, "Usage: sleep <ticks>\n");
-        exit(1);
-    }
+  // Check if the user passed the number of ticks argument
+  if (argc < 2) {
+    fprintf(2, "Usage: sleep ticks\n");
+    exit(1);
+  }
 
-    int ticks = atoi(argv[1]);
+  // Convert the argument string to an integer and call the system call
+  int ticks = atoi(argv[1]);
+  pause(ticks);  // Use sleep(ticks) if your specific xv6 version uses the 'sleep' system call instead
 
-    if (ticks < 0)
-    {
-        fprintf(2, "Error: ticks must be a non-negative integer\n");
-        exit(1);
-    }
-
-    sleep(ticks);
+  exit(0);
 }
-
-
-
-void sleep(int ticks)
-{
-  pause(ticks);
-}
-

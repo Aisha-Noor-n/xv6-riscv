@@ -2,90 +2,104 @@
 #include "kernel/stat.h"
 #include "user/user.h"
 
-void memdump(char *fmt, char *data, int len) {
-    char *p = data;
-    char *end = data + len;
+void
+memdump(char *fmt, char *data, int len)
+{
+  int i;
 
-    for (int i = 0; fmt[i] != '\0'; i++) {
-        char f = fmt[i];
+  for(i = 0; fmt[i] != '\0'; i++){
+    switch(fmt[i]){
+    case 'i':
+      if(len < 4){
+        printf("memdump: not enough data for 'i'\n");
+        return;
+      }
+      printf("%d\n", *(int *)data);
+      data += 4;
+      len -= 4;
+      break;
 
-        // i: 32-bit Integer, decimal (4 bytes)
-        if (f == 'i') {
-            if (p + 4 > end) {
-                printf("memdump: not enough data for '%c'\n", f);
-                return;
-            }
-            printf("%d\n", *(int *)p);
-            p += 4;
-        } 
-        // p: 64-bit integer, hex (8 bytes)
-        else if (f == 'p') {
-            if (p + 8 > end) {
-                printf("memdump: not enough data for '%c'\n", f);
-                return;
-            }
-            printf("%p\n", (void *)*(uint64 *)p);
-            p += 8;
-        } 
-        // h: 16-bit integer, decimal (2 bytes)
-        else if (f == 'h') {
-            if (p + 2 > end) {
-                printf("memdump: not enough data for '%c'\n", f);
-                return;
-            }
-            printf("%d\n", *(short *)p);
-            p += 2;
-        } 
-        // c: 8-bit ASCII character (1 byte)
-        else if (f == 'c') {
-            if (p + 1 > end) {
-                printf("memdump: not enough data for '%c'\n", f);
-                return;
-            }
-            printf("%c\n", *p);
-            p += 1;
-        } 
-        // s: 64-bit pointer to a C string (8 bytes)
-        else if (f == 's') {
-            if (p + 8 > end) {
-                printf("memdump: not enough data for '%c'\n", f);
-                return;
-            }
-            char *str = *(char **)p;
-            printf("%s\n", str);
-            p += 8;
-        } 
-        // S: print string up to null byte or end of valid data
-        else if (f == 'S') {
-            while (p < end && *p != '\0') {
-                printf("%c", *p);
-                p++;
-            }
-            printf("\n");
-            // Consume the null byte if we stopped because of it
-            if (p < end && *p == '\0') {
-                p++;
-            }
-        }
+    case 'p':
+      if(len < 8){
+        printf("memdump: not enough data for 'p'\n");
+        return;
+      }
+      printf("%lx\n", *(uint64 *)data);
+      data += 8;
+      len -= 8;
+      break;
+
+    case 'h':
+      if(len < 2){
+        printf("memdump: not enough data for 'h'\n");
+        return;
+      }
+      printf("%d\n", *(short *)data);
+      data += 2;
+      len -= 2;
+      break;
+
+    case 'c':
+      if(len < 1){
+        printf("memdump: not enough data for 'c'\n");
+        return;
+      }
+      printf("%c\n", *data);
+      data++;
+      len--;
+      break;
+
+    case 's':
+      if(len < 8){
+        printf("memdump: not enough data for 's'\n");
+        return;
+      }
+      printf("%s\n", *(char **)data);
+      data += 8;
+      len -= 8;
+      break;
+
+    case 'S':
+      while(len > 0 && *data != '\0'){
+        printf("%c", *data);
+        data++;
+        len--;
+      }
+      printf("\n");
+      return;
     }
+  }
 }
 
-int main(int argc, char *argv[]) {
-    // If invoked with an argument, read standard input to EOF
-    if (argc > 1) {
-        char buf[1024];
-        int len = 0;
-        int n;
-        
-        while ((n = read(0, buf + len, sizeof(buf) - len)) > 0) {
-            len += n;
-        }
-        
-        memdump(argv[1], buf, len);
-    } else {
-        printf("Error: Missing test harness for zero arguments.\n");
-        printf("Run with an argument (e.g., echo a | memdump i) to use standard input.\n");
-    }
-    
+int
+main(int argc, char *argv[])
+{
+  char data[1024];
+  int len;
+  int n;
+
+  if(argc == 1){
     exit(0);
+  }
+
+  len = 0;
+
+  while(len < sizeof(data)){
+    n = read(0, data + len, sizeof(data) - len);
+
+    if(n < 0){
+      fprintf(2, "memdump: read error\n");
+      exit(1);
+    }
+
+    if(n == 0)
+      break;
+
+    len += n;
+  }
+
+  memdump(argv[1], data, len);
+
+  exit(0);
 }
+

@@ -98,7 +98,6 @@ allocpid()
   pid = nextpid;
   nextpid = nextpid + 1;
   release(&pid_lock);
-
   return pid;
 }
 
@@ -124,6 +123,9 @@ allocproc(void)
 found:
   p->pid = allocpid();
   p->state = USED;
+#ifdef LAB_PGTBL
+  p->usyscall = 0;
+#endif
 
   // Allocate a trapframe page.
   if ((p->trapframe = (struct trapframe *)kalloc()) == 0) {
@@ -131,6 +133,19 @@ found:
     release(&p->lock);
     return 0;
   }
+#ifdef LAB_PGTBL
+  p->usyscall = (struct usyscall *)kalloc();
+  if (p->usyscall == 0) {
+    freeproc(p);
+    release(&p->lock);
+    return 0;
+  }
+  p->usyscall->pid = p->pid;
+#endif
+
+#ifdef LAB_LOCK
+  p->pincpu = 0;
+#endif
 
   // An empty user page table.
   p->pagetable = proc_pagetable(p);
@@ -158,6 +173,11 @@ freeproc(struct proc *p)
   if (p->trapframe)
     kfree((void *)p->trapframe);
   p->trapframe = 0;
+#ifdef LAB_PGTBL
+  if (p->usyscall)
+    kfree((void *)p->usyscall);
+  p->usyscall = 0;
+#endif
   if (p->pagetable)
     proc_freepagetable(p->pagetable, p->sz);
   p->pagetable = 0;
@@ -200,6 +220,15 @@ proc_pagetable(struct proc *p)
     uvmfree(pagetable, 0);
     return 0;
   }
+#ifdef LAB_PGTBL
+  if (mappages(pagetable, USYSCALL, PGSIZE,
+               (uint64)(p->usyscall), PTE_R | PTE_U) < 0) {
+    uvmunmap(pagetable, TRAPFRAME, 1, 0);
+    uvmunmap(pagetable, TRAMPOLINE, 1, 0);
+    uvmfree(pagetable, 0);
+    return 0;
+  }
+#endif
 
   return pagetable;
 }
@@ -209,6 +238,9 @@ proc_pagetable(struct proc *p)
 void
 proc_freepagetable(pagetable_t pagetable, uint64 sz)
 {
+#ifdef LAB_PGTBL
+  uvmunmap(pagetable, USYSCALL, 1, 0);
+#endif
   uvmunmap(pagetable, TRAMPOLINE, 1, 0);
   uvmunmap(pagetable, TRAPFRAME, 1, 0);
   uvmfree(pagetable, sz);
@@ -240,7 +272,7 @@ growproc(int n)
 
   sz = p->sz;
   if (n > 0) {
-    if (sz + n > TRAPFRAME) {
+    if (sz + n > UTOP) {
       return -1;
     }
     if ((sz = uvmalloc(p->pagetable, sz, sz + n, PTE_W)) == 0) {
@@ -274,7 +306,7 @@ kfork(void)
     return -1;
   }
   np->sz = p->sz;
-  np->mask = p->mask;
+
 
   // copy saved user registers.
   *(np->trapframe) = *(p->trapframe);
@@ -300,6 +332,7 @@ kfork(void)
 
   acquire(&np->lock);
   np->state = RUNNABLE;
+
   release(&np->lock);
 
   return pid;
@@ -339,6 +372,7 @@ kexit(int status)
       p->ofile[fd] = 0;
     }
   }
+
 
   begin_op();
   iput(p->cwd);
@@ -442,15 +476,25 @@ scheduler(void)
     intr_on();
     intr_off();
 
-    int found = 0;
+    int nproc = 0;
     for (p = proc; p < &proc[NPROC]; p++) {
       acquire(&p->lock);
+      if (p->state != UNUSED) {
+        nproc++;
+      }
+#ifdef LAB_LOCK
+      if (p->pincpu && p->pincpu != c) {
+        release(&p->lock);
+        continue;
+      }
+#endif
       if (p->state == RUNNABLE) {
         // Switch to chosen process.  It is the process's job
         // to release its lock and then reacquire it
         // before jumping back to us.
         p->state = RUNNING;
         c->proc = p;
+
         swtch(&c->context, &p->context);
 
         // Don't re-enable interrupts on release.
@@ -459,13 +503,15 @@ scheduler(void)
         // Process is done running for now.
         // It should have changed its p->state before coming back.
         c->proc = 0;
-        found = 1;
       }
       release(&p->lock);
     }
-    if (found == 0) {
+    if (nproc <= 2) { // only init and sh exist
       // nothing to run; stop running on this core until an interrupt.
+      intr_on();
+#ifndef LAB_FS
       asm volatile("wfi");
+#endif
     }
   }
 }
@@ -520,13 +566,14 @@ forkret(void)
   // Still holding p->lock from scheduler.
   release(&p->lock);
 
-  if (first) {
-    first = 0;
-
+  if (__atomic_load_n(&first, __ATOMIC_ACQUIRE)) {
     // File system initialization must be run in the context of a
     // regular process (e.g., because it calls sleep), and thus cannot
     // be run from main().
     fsinit(ROOTDEV);
+
+    // ensure other cores see first=0.
+    __atomic_store_n(&first, 0, __ATOMIC_RELEASE);
 
     // We can invoke kexec() now that file system is initialized.
     // Put the return value (argc) of kexec into a0.
@@ -602,9 +649,6 @@ int
 kkill(int pid)
 {
   struct proc *p;
-
-  if (pid == 0)
-    return -1;
 
   for (p = proc; p < &proc[NPROC]; p++) {
     acquire(&p->lock);

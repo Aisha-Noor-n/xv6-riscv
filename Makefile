@@ -152,11 +152,11 @@ UPROGS=\
 	$U/_sync\
 	$U/_sleep\
 	$U/_sixfive\
-	$U/_memdump\
 	$U/_find\
+	$U/_memdump\
 	$U/_sandbox\
-	$U/_sbtest\
-
+	$U/_secret\
+	$U/_attack	
 
 fs.img: mkfs/mkfs README $(UPROGS)
 	mkfs/mkfs fs.img README $(UPROGS)
